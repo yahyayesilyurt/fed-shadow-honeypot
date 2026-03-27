@@ -40,18 +40,21 @@ class ShadowHoneypotStrategy(fl.server.strategy.FedAvg):
     Custom FL strategy that filters out honeypot client updates.
 
     How it works:
-    - Separates incoming updates each round by the 'is_honeypot' label.
+    - The server maintains a private registry of honeypot client IDs.
     - Only aggregates updates from real clients using FedAvg.
     - Honeypot updates are silently discarded.
+    - No honeypot indicator is sent over the network, so an eavesdropper
+      cannot distinguish real updates from honeypot ones.
     """
 
-    def __init__(self, num_real_clients: int = 16, **kwargs):
+    def __init__(self, num_real_clients: int = 16, honeypot_cids: set = None, **kwargs):
         super().__init__(
             fit_metrics_aggregation_fn=weighted_average,
             evaluate_metrics_aggregation_fn=weighted_average,
             **kwargs,
         )
         self.num_real_clients = num_real_clients
+        self.honeypot_cids = honeypot_cids or set()
 
     def aggregate_fit(
         self,
@@ -66,7 +69,7 @@ class ShadowHoneypotStrategy(fl.server.strategy.FedAvg):
         honeypot_count   = 0
 
         for client_proxy, fit_res in results:
-            if fit_res.metrics.get("is_honeypot", False):
+            if getattr(client_proxy, "cid", None) in self.honeypot_cids:
                 honeypot_count += 1
             else:
                 real_results.append((client_proxy, fit_res))
@@ -99,12 +102,7 @@ class ShadowHoneypotStrategy(fl.server.strategy.FedAvg):
         ]
         metrics_aggregated = {}
         if fit_metrics:
-            # Exclude the is_honeypot boolean from the average calculation
-            clean_metrics = [
-                (n, {k: v for k, v in m.items() if k != "is_honeypot"})
-                for n, m in fit_metrics
-            ]
-            metrics_aggregated = weighted_average(clean_metrics)
+            metrics_aggregated = weighted_average(fit_metrics)
             print(f"  Train Loss (avg)    : {metrics_aggregated.get('train_loss', 'N/A'):.4f}")
             print(f"  Train Acc  (avg)    : {metrics_aggregated.get('train_acc',  'N/A'):.4f}")
 
@@ -119,10 +117,11 @@ class ShadowHoneypotStrategy(fl.server.strategy.FedAvg):
     ) -> Tuple[Optional[float], Dict[str, Scalar]]:
         """
         Collects and logs evaluate metrics.
-        Also filters out honeypots since they send dummy metrics during evaluation.
+        Filters out honeypots using the server-side client registry.
         """
         real_results = [
-            (cp, er) for cp, er in results if er.num_examples > 1
+            (cp, er) for cp, er in results
+            if getattr(cp, "cid", None) not in self.honeypot_cids
         ]
 
         if not real_results:
