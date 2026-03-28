@@ -20,7 +20,6 @@ def set_parameters(net, parameters: list[np.ndarray]):
 class ECGClient(fl.client.NumPyClient):
     """
     FL client that performs local training on real ECG data.
-    Sends 'is_honeypot: False' signal to the server → included in aggregation.
     """
     def __init__(self, net: ECGNet, train_loader, test_loader, device: torch.device):
         self.net          = net
@@ -44,7 +43,6 @@ class ECGClient(fl.client.NumPyClient):
             get_parameters(self.net),
             num_samples,
             {
-                "is_honeypot": False,       # server uses this label for filtering
                 "train_loss":  float(train_loss),
                 "train_acc":   float(train_acc),
             }
@@ -73,7 +71,7 @@ class HoneypotClient(fl.client.NumPyClient):
     - Does not use real data and performs no training.
     - Adds high-variance Gaussian noise on top of the global weights.
     - When an attacker reconstructs these gradients, they receive meaningless signals.
-    - When the server sees the 'is_honeypot: True' label, it excludes this client from aggregation.
+    - The server identifies honeypots by a private client registry, not by any flag in the updates.
     """
 
     NOISE_SCALE = 5.0
@@ -91,7 +89,7 @@ class HoneypotClient(fl.client.NumPyClient):
             for param in parameters
         ]
 
-        return poisoned, 1, {"is_honeypot": True}
+        return poisoned, 1, {}
 
     def evaluate(self, parameters, config):
         return 0.0, 1, {"accuracy": 0.0, "f1_score": 0.0}

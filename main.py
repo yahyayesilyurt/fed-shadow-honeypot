@@ -204,16 +204,21 @@ def main():
         max_records=None,                   # use None for full data
     )
 
+    honeypot_cids = set(range(NUM_REAL_CLIENTS, TOTAL_CLIENTS))
+
     def client_fn(cid: str) -> fl.client.Client:
         client_id = int(cid)
         net = ECGNet().to(device)
         if client_id < NUM_REAL_CLIENTS:
-            return ECGClient(net, client_loaders[client_id], test_loader, device).to_client()
+            client = ECGClient(net, client_loaders[client_id], test_loader, device).to_client()
         else:
-            return HoneypotClient(net, device).to_client()
+            client = HoneypotClient(net, device).to_client()
+        client.cid = client_id
+        return client
 
     strategy = ShadowHoneypotStrategy(
         num_real_clients=NUM_REAL_CLIENTS,
+        honeypot_cids=honeypot_cids,
         fraction_fit=1.0,
         fraction_evaluate=1.0,
         min_fit_clients=TOTAL_CLIENTS,
